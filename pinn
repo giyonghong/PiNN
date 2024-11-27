@@ -1,0 +1,64 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+class PINN(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super(PINN, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, output_dim)
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+def physics_loss(model, x):
+    x.requires_grad = True
+    y_pred = model(x)
+    dy_dx = torch.autograd.grad(
+        y_pred, x, grad_outputs=torch.ones_like(y_pred),
+        create_graph=True
+    )[0]
+    physics_residual = dy_dx - torch.sin(x)
+    return torch.mean(physics_residual**2)
+
+def generate_data(N_u, N_f):
+    x_u = torch.rand(N_u, 1) * 2 - 1
+    x_f = torch.rand(N_f, 1) * 2 - 1
+    return x_u, x_f
+
+def train_pinn(N_u, N_f, epochs=10000, lr=1e-3):
+    x_u, x_f = generate_data(N_u, N_f)
+
+    model = PINN(input_dim=1, hidden_dim=20, output_dim=1)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    mse_loss = nn.MSELoss()
+
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+
+        pred_u = model(x_u)
+        data_loss = mse_loss(pred_u, torch.sin(x_u))
+
+        p_loss = physics_loss(model, x_f)
+        loss = data_loss + p_loss
+        loss.backward()
+        optimizer.step()
+
+        if epoch % 1000 == 0:
+            print(f"Epoch {epoch}, Loss: {loss.item():.4e}")
+
+    return model
+
+N_f = 2000
+N_u_list = [20, 40, 60, 80, 100, 200]
+
+results = []
+for N_u in N_u_list:
+    print(f"Training with N_u={N_u}, N_f={N_f}")
+    model = train_pinn(N_u, N_f)
+    results.append(model)
